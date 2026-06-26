@@ -1,0 +1,99 @@
+name: gnmi-kafka-demo
+
+networks:
+  demo-net:
+    driver: bridge
+
+services:
+  srlinux:
+    image: ghcr.io/nokia/srlinux:25.7.2
+    container_name: srlinux
+    hostname: srlinux
+    privileged: true
+    environment:
+      SRLINUX: "1"
+    sysctls:
+      net.ipv4.ip_forward: 0
+      net.ipv6.conf.all.disable_ipv6: 0
+      net.ipv6.conf.all.accept_dad: 0
+      net.ipv6.conf.default.accept_dad: 0
+      net.ipv6.conf.all.autoconf: 0
+      net.ipv6.conf.default.autoconf: 0
+    command: ["sudo", "bash", "-c", "/opt/srlinux/bin/sr_linux"]
+    networks: [demo-net]
+    healthcheck:
+      test: ["CMD-SHELL", "sudo ip netns exec srbase-mgmt bash -c '</dev/tcp/127.0.0.1/57400' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 90
+      start_period: 600s
+
+  driver:
+    build:
+      context: .
+      dockerfile: cmd/driver/Dockerfile
+    container_name: driver
+    depends_on:
+      srlinux:
+        condition: service_healthy
+    volumes:
+      - ./configs/driver.yaml:/etc/gnmi-kafka/driver.yaml:ro
+    networks: [demo-net]
+    restart: unless-stopped
+
+  kafka:
+    image: apache/kafka:3.9.1
+    container_name: kafka
+    hostname: kafka
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,PLAINTEXT_HOST://0.0.0.0:29092"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports:
+      - "29092:29092"
+    networks: [demo-net]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 20s
+      retries: 20
+      start_period: 30s
+
+  gateway:
+    build:
+      context: .
+      dockerfile: cmd/gateway/Dockerfile
+    container_name: gateway
+    depends_on:
+      srlinux:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./configs/gateway.yaml:/etc/gnmi-kafka/gateway.yaml:ro
+    networks: [demo-net]
+    restart: unless-stopped
+
+  kafka-ui:
+    image: ghcr.io/kafbat/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: "demo"
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: "kafka:9092"
+      DYNAMIC_CONFIG_ENABLED: "true"
+    ports:
+      - "8080:8080"
+    networks: [demo-net]

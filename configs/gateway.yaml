@@ -1,0 +1,33 @@
+# gateway config — gNMI subscriber that produces JSON records to Kafka.
+# In k8s this is the contents of a ConfigMap mounted into the gateway Deployment.
+
+kafka:
+  brokers: ["kafka:9092"]
+  topic: gnmi.telemetry
+
+# Shared gNMI dial + subscription settings, applied to every host.
+# (In k8s, move username/password to a Secret and inject via env or projected
+# volume; the loader reads ${VAR} expansions if you'd like that wired up.)
+gnmi:
+  port: 57400
+  username: admin
+  password: NokiaSrl1!
+  skip_verify: true        # TLS with no cert verification (demo)
+  insecure: false          # set true to use plaintext gNMI instead of TLS
+  encoding: json_ietf
+  dial_timeout: 10s
+  sample_interval: 5s      # applied to every path in `paths:` below
+
+# gNMI paths the gateway subscribes to on every host.
+paths:
+  - /interface[name=*]/admin-state
+  - /interface[name=*]/oper-state
+  - /interface[name=*]/statistics/in-octets
+  - /interface[name=*]/statistics/out-octets
+
+# Hosts to poll. Address only — port comes from gnmi.port above (override
+# inline by writing "host:port"). Hosts are dialed concurrently.
+hosts:
+  - srlinux
+  # - srlinux-2
+  # - 192.0.2.10
