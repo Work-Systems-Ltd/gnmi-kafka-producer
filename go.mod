@@ -1,6 +1,6 @@
 module github.com/tbotnz/gnmi-kafka-producer
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/openconfig/gnmi v0.14.1
